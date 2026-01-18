@@ -1,29 +1,42 @@
 #!/bin/bash
 # YouTube 字幕轉換器 - 雙擊啟動
 
-echo "========================================"
-echo "🎬 YouTube 字幕轉換器"
-echo "========================================"
+clear
+echo ""
+echo "  ╔═══════════════════════════════════════════════════════╗"
+echo "  ║                                                       ║"
+echo "  ║   ▶ YouTube  字幕轉換器                               ║"
+echo "  ║                                                       ║"
+echo "  ║   AI 智慧翻譯 · 多語言支援 · 一鍵產生字幕             ║"
+echo "  ║                                                       ║"
+echo "  ╚═══════════════════════════════════════════════════════╝"
 echo ""
 
 # 進入程式目錄（使用絕對路徑）
 APP_DIR="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter"
 cd "$APP_DIR"
 
-# 啟動網頁介面
-echo "正在啟動..."
-echo "請稍候，瀏覽器會自動開啟"
+# 關閉舊的服務（如果有的話）
+lsof -ti:7860 | xargs kill -9 2>/dev/null
+
+# 清理快取
+rm -rf __pycache__ .gradio 2>/dev/null
+
+echo "  🚀 正在啟動服務..."
 echo ""
 
 # 啟動服務並開啟瀏覽器
 python3 web_app.py &
-sleep 3
+sleep 4
 open "http://localhost:7860"
 
-# 保持視窗開啟
 echo ""
-echo "服務已啟動！"
-echo "如果瀏覽器沒有自動開啟，請手動開啟: http://localhost:7860"
+echo "  ✅ 服務已啟動！"
 echo ""
-echo "按 Ctrl+C 可以關閉服務"
+echo "  📍 本機網址: http://localhost:7860"
+echo ""
+echo "  💡 提示: 按 Ctrl+C 可以關閉服務"
+echo ""
+echo "  ─────────────────────────────────────────────────────────"
+echo ""
 wait
