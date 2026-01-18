@@ -22,7 +22,7 @@ import gradio as gr
 
 class Config:
     """應用程式設定"""
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: str = "AIzaSyDbAyO-T-NJdylQR4W8cfwd78QPImNkDJY"
     GEMINI_MODEL: str = "gemini-2.0-flash-exp"
     OUTPUT_DIR: Path = Path("./output")
     TEMP_DIR: Path = Path("./temp")
