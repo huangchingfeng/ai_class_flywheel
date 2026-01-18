@@ -751,7 +751,7 @@ def create_ui():
                     quality1 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
                 btn1 = gr.Button("🚀 開始轉換", variant="primary")
                 output1_video = gr.File(label="下載影片")
-                output1_status = gr.Textbox(label="狀態", show_copy_button=True)
+                output1_status = gr.Textbox(label="狀態")
 
                 btn1.click(process_bilingual_video, inputs=[url1, quality1, source_lang1, target_lang1], outputs=[output1_video, output1_status])
 
@@ -765,7 +765,7 @@ def create_ui():
                     quality2 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
                 btn2 = gr.Button("🚀 開始轉換", variant="primary")
                 output2_video = gr.File(label="下載影片")
-                output2_status = gr.Textbox(label="狀態", show_copy_button=True)
+                output2_status = gr.Textbox(label="狀態")
 
                 btn2.click(process_single_lang_video, inputs=[url2, quality2, source_lang2, target_lang2], outputs=[output2_video, output2_status])
 
@@ -775,7 +775,7 @@ def create_ui():
                 url3 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
                 btn3 = gr.Button("🚀 開始轉換", variant="primary")
                 output3_audio = gr.File(label="下載 MP3")
-                output3_status = gr.Textbox(label="狀態", show_copy_button=True)
+                output3_status = gr.Textbox(label="狀態")
 
                 btn3.click(process_to_mp3, inputs=[url3], outputs=[output3_audio, output3_status])
 
@@ -791,7 +791,7 @@ def create_ui():
                     output4_translated = gr.File(label="翻譯字幕")
                     output4_original = gr.File(label="原始字幕")
                     output4_bilingual = gr.File(label="雙語字幕")
-                output4_status = gr.Textbox(label="狀態", show_copy_button=True)
+                output4_status = gr.Textbox(label="狀態")
 
                 btn4.click(process_subtitles_only, inputs=[url4, source_lang4, target_lang4], outputs=[output4_translated, output4_original, output4_bilingual, output4_status])
 
