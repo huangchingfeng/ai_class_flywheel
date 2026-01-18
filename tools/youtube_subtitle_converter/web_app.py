@@ -530,10 +530,11 @@ def embed_subtitles(video_path: Path, subtitle_path: Path, output_path: Path,
 
         # 在工作目錄中執行 FFmpeg，使用相對路徑
         # 這樣可以完全避免路徑中的特殊字元問題
+        # 注意：不使用 force_style 以避免跨平台兼容性問題
         cmd = [
             "ffmpeg",
             "-i", "input.mp4",
-            "-vf", f"subtitles=subtitle.srt:force_style='FontSize={font_size}'",
+            "-vf", "subtitles=subtitle.srt",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
@@ -672,6 +673,28 @@ def process_to_mp3(url: str, progress=gr.Progress()) -> Tuple[str, str]:
     except Exception as e:
         return None, f"❌ 錯誤：{str(e)}"
 
+def format_srt_as_table(srt_content: str, max_entries: int = 50) -> str:
+    """將 SRT 內容格式化為表格"""
+    blocks = srt_content.strip().split('\n\n')
+    rows = []
+
+    for block in blocks[:max_entries]:
+        lines = block.strip().split('\n')
+        if len(lines) >= 3 and '-->' in lines[1]:
+            time_line = lines[1].strip()
+            text = ' '.join(lines[2:]).strip().replace('|', '｜')  # 避免破壞表格
+            rows.append(f"| {time_line} | {text} |")
+        elif len(lines) >= 2 and '-->' in lines[0]:
+            time_line = lines[0].strip()
+            text = ' '.join(lines[1:]).strip().replace('|', '｜')
+            rows.append(f"| {time_line} | {text} |")
+
+    if len(blocks) > max_entries:
+        rows.append(f"| ... | （共 {len(blocks)} 條，僅顯示前 {max_entries} 條） |")
+
+    table = "| 時間軸 | 字幕內容 |\n|--------|----------|\n" + "\n".join(rows)
+    return table
+
 def process_subtitles_only(url: str, source_lang: str, target_langs: list, progress=gr.Progress()):
     """功能4: 只輸出字幕檔（支援多語言）"""
     try:
@@ -710,7 +733,10 @@ def process_subtitles_only(url: str, source_lang: str, target_langs: list, progr
 
         # 翻譯成多種語言
         all_results = []
-        all_results.append(f"📄 **原始字幕 ({source_lang})**\n```\n{srt_content[:2000]}{'...(truncated)' if len(srt_content) > 2000 else ''}\n```\n")
+
+        # 原始字幕（可摺疊）
+        original_table = format_srt_as_table(srt_content)
+        all_results.append(f"<details>\n<summary>📄 原始字幕 ({source_lang}) - 點擊展開</summary>\n\n{original_table}\n\n</details>")
 
         saved_files = [str(original_srt_path)]
 
@@ -730,12 +756,13 @@ def process_subtitles_only(url: str, source_lang: str, target_langs: list, progr
                 f.write(translated_srt)
             saved_files.append(str(translated_path))
 
-            # 加入結果顯示
-            all_results.append(f"🌐 **{target_lang} 翻譯**\n```\n{translated_srt[:2000]}{'...(truncated)' if len(translated_srt) > 2000 else ''}\n```\n")
+            # 加入結果顯示（可摺疊）
+            translated_table = format_srt_as_table(translated_srt)
+            all_results.append(f"<details>\n<summary>🌐 {target_lang} 翻譯 - 點擊展開</summary>\n\n{translated_table}\n\n</details>")
 
         progress(1.0, desc="完成！")
 
-        results_text = "\n---\n".join(all_results)
+        results_text = "\n\n".join(all_results)
         status = f"✅ 完成！已翻譯成 {total_langs} 種語言"
 
         return saved_files, results_text, status
@@ -772,7 +799,10 @@ def process_uploaded_audio(audio_file, source_lang: str, target_langs: list, pro
 
         # 翻譯成多種語言
         all_results = []
-        all_results.append(f"📄 **原始字幕 ({source_lang})**\n```\n{srt_content[:2000]}{'...(truncated)' if len(srt_content) > 2000 else ''}\n```\n")
+
+        # 原始字幕（可摺疊）
+        original_table = format_srt_as_table(srt_content)
+        all_results.append(f"<details>\n<summary>📄 原始字幕 ({source_lang}) - 點擊展開</summary>\n\n{original_table}\n\n</details>")
 
         saved_files = [str(original_srt_path)]
 
@@ -792,12 +822,13 @@ def process_uploaded_audio(audio_file, source_lang: str, target_langs: list, pro
                 f.write(translated_srt)
             saved_files.append(str(translated_path))
 
-            # 加入結果顯示
-            all_results.append(f"🌐 **{target_lang} 翻譯**\n```\n{translated_srt[:2000]}{'...(truncated)' if len(translated_srt) > 2000 else ''}\n```\n")
+            # 加入結果顯示（可摺疊）
+            translated_table = format_srt_as_table(translated_srt)
+            all_results.append(f"<details>\n<summary>🌐 {target_lang} 翻譯 - 點擊展開</summary>\n\n{translated_table}\n\n</details>")
 
         progress(1.0, desc="完成！")
 
-        results_text = "\n---\n".join(all_results)
+        results_text = "\n\n".join(all_results)
         status = f"✅ 完成！已翻譯成 {total_langs} 種語言"
 
         return saved_files, results_text, status
