@@ -488,43 +488,48 @@ def generate_srt(entries: list, include_original: bool = True, include_translati
 def embed_subtitles(video_path: Path, subtitle_path: Path, output_path: Path,
                    font_size: int = 24) -> Path:
     """將字幕嵌入影片（使用安全的臨時檔案避免特殊字元問題）"""
-    # 為了避免 FFmpeg 字幕濾鏡的特殊字元問題，
-    # 將字幕檔複製到一個安全名稱的臨時檔案
     import uuid
-    safe_name = f"subtitle_{uuid.uuid4().hex}.srt"
-    safe_subtitle_path = Config.TEMP_DIR / safe_name
+
+    # 建立安全的工作目錄和檔案名稱
+    work_dir = Config.TEMP_DIR / f"work_{uuid.uuid4().hex}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_video = work_dir / "input.mp4"
+    safe_subtitle = work_dir / "subtitle.srt"
+    safe_output = work_dir / "output.mp4"
 
     try:
-        # 複製字幕檔到安全路徑
-        shutil.copy2(subtitle_path, safe_subtitle_path)
+        # 複製檔案到安全路徑
+        shutil.copy2(video_path, safe_video)
+        shutil.copy2(subtitle_path, safe_subtitle)
 
-        # 使用絕對路徑並進行 FFmpeg 所需的跳脫
-        sub_path_str = str(safe_subtitle_path.absolute())
-        # FFmpeg subtitles filter 需要跳脫冒號和反斜線
-        sub_path_str = sub_path_str.replace("\\", "/").replace(":", "\\:")
-
+        # 在工作目錄中執行 FFmpeg，使用相對路徑
+        # 這樣可以完全避免路徑中的特殊字元問題
         cmd = [
             "ffmpeg",
-            "-i", str(video_path),
-            "-vf", f"subtitles='{sub_path_str}':force_style='FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2'",
+            "-i", "input.mp4",
+            "-vf", f"subtitles=subtitle.srt:force_style='FontSize={font_size}'",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
             "-c:a", "aac",
             "-b:a", "128k",
             "-y",
-            str(output_path)
+            "output.mp4"
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(work_dir))
         if result.returncode != 0:
             raise RuntimeError(f"嵌入字幕失敗: {result.stderr}")
 
+        # 複製輸出檔案到目標位置
+        shutil.copy2(safe_output, output_path)
+
         return output_path
     finally:
-        # 清理臨時字幕檔
-        if safe_subtitle_path.exists():
-            safe_subtitle_path.unlink()
+        # 清理工作目錄
+        if work_dir.exists():
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 # ==================== 主要功能 ====================
 
