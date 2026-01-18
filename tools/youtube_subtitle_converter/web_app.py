@@ -2,6 +2,7 @@
 """
 YouTube 字幕轉換器 - 網頁介面
 提供多種影片處理功能的 Web 應用程式
+支援多語言翻譯
 """
 import os
 import sys
@@ -19,6 +20,31 @@ import requests
 import gradio as gr
 
 # ==================== 設定 ====================
+
+# 支援的語言列表
+SUPPORTED_LANGUAGES = {
+    "中文（繁體）": "zh-TW",
+    "中文（簡體）": "zh-CN",
+    "英文": "en",
+    "日文": "ja",
+    "韓文": "ko",
+    "法文": "fr",
+    "德文": "de",
+    "西班牙文": "es",
+    "葡萄牙文": "pt",
+    "俄文": "ru",
+    "義大利文": "it",
+    "荷蘭文": "nl",
+    "阿拉伯文": "ar",
+    "印地文": "hi",
+    "泰文": "th",
+    "越南文": "vi",
+    "印尼文": "id",
+    "馬來文": "ms",
+}
+
+# 語言代碼到名稱的映射
+LANG_CODE_TO_NAME = {v: k for k, v in SUPPORTED_LANGUAGES.items()}
 
 class Config:
     """應用程式設定"""
@@ -55,15 +81,6 @@ def format_srt_time(seconds: float) -> str:
     millis = int((seconds % 1) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
-def parse_srt_time(time_str: str) -> float:
-    """將 SRT 時間格式轉換為秒"""
-    time_str = time_str.strip().replace(',', '.')
-    parts = time_str.split(':')
-    hours = int(parts[0])
-    minutes = int(parts[1])
-    seconds = float(parts[2])
-    return hours * 3600 + minutes * 60 + seconds
-
 # ==================== YouTube 下載 ====================
 
 def get_video_info(url: str) -> dict:
@@ -73,6 +90,13 @@ def get_video_info(url: str) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"無法獲取影片資訊: {result.stderr}")
     return json.loads(result.stdout)
+
+def get_available_subtitles(url: str) -> Tuple[List[str], List[str]]:
+    """取得可用的字幕語言列表"""
+    info = get_video_info(url)
+    manual_subs = list(info.get("subtitles", {}).keys())
+    auto_subs = list(info.get("automatic_captions", {}).keys())
+    return manual_subs, auto_subs
 
 def download_video(url: str, output_dir: Path, quality: str = "720p") -> Tuple[Path, dict]:
     """下載影片"""
@@ -90,7 +114,6 @@ def download_video(url: str, output_dir: Path, quality: str = "720p") -> Tuple[P
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        # 嘗試下載最佳品質
         cmd = ["yt-dlp", "-f", "best[ext=mp4]/best", "-o", str(video_path), "--merge-output-format", "mp4", url]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -106,9 +129,9 @@ def download_audio(url: str, output_dir: Path) -> Tuple[Path, dict]:
 
     cmd = [
         "yt-dlp",
-        "-x",  # 提取音訊
+        "-x",
         "--audio-format", "mp3",
-        "--audio-quality", "0",  # 最佳品質
+        "--audio-quality", "0",
         "-o", str(audio_path),
         url
     ]
@@ -117,51 +140,74 @@ def download_audio(url: str, output_dir: Path) -> Tuple[Path, dict]:
     if result.returncode != 0:
         raise RuntimeError(f"下載音訊失敗: {result.stderr}")
 
-    # yt-dlp 可能會改變副檔名
-    if not audio_path.exists():
-        possible_path = output_dir / f"{safe_title}.mp3"
-        if possible_path.exists():
-            audio_path = possible_path
-
     return audio_path, info
 
-def download_existing_subtitles(url: str, output_dir: Path, lang: str = "en") -> Optional[Path]:
-    """下載現有字幕"""
+def download_subtitles_any_language(url: str, output_dir: Path, preferred_lang: str = None) -> Tuple[Optional[Path], str]:
+    """
+    下載字幕（支援任何語言）
+
+    Returns:
+        Tuple[Optional[Path], str]: (字幕檔路徑, 偵測到的語言代碼)
+    """
     info = get_video_info(url)
     safe_title = sanitize_filename(info.get("title", "video"))
 
-    # 嘗試下載手動字幕
-    cmd = [
-        "yt-dlp",
-        "--write-sub",
-        "--sub-lang", lang,
-        "--sub-format", "srt",
-        "--skip-download",
-        "-o", str(output_dir / safe_title),
-        url
-    ]
-    subprocess.run(cmd, capture_output=True, text=True)
+    manual_subs = info.get("subtitles", {})
+    auto_subs = info.get("automatic_captions", {})
 
-    subtitle_path = output_dir / f"{safe_title}.{lang}.srt"
-    if subtitle_path.exists():
-        return subtitle_path
+    # 優先順序：指定語言 > 手動字幕 > 自動字幕
+    lang_to_try = []
 
-    # 嘗試自動字幕
-    cmd = [
-        "yt-dlp",
-        "--write-auto-sub",
-        "--sub-lang", lang,
-        "--sub-format", "srt",
-        "--skip-download",
-        "-o", str(output_dir / safe_title),
-        url
-    ]
-    subprocess.run(cmd, capture_output=True, text=True)
+    if preferred_lang:
+        lang_to_try.append(preferred_lang)
 
-    if subtitle_path.exists():
-        return subtitle_path
+    # 添加所有可用的手動字幕語言
+    for lang in manual_subs.keys():
+        if lang not in lang_to_try:
+            lang_to_try.append(lang)
 
-    return None
+    # 添加所有可用的自動字幕語言
+    for lang in auto_subs.keys():
+        if lang not in lang_to_try:
+            lang_to_try.append(lang)
+
+    # 嘗試下載
+    for lang in lang_to_try:
+        subtitle_path = output_dir / f"{safe_title}.{lang}.srt"
+
+        # 先嘗試手動字幕
+        if lang in manual_subs:
+            cmd = [
+                "yt-dlp",
+                "--write-sub",
+                "--sub-lang", lang,
+                "--sub-format", "srt",
+                "--skip-download",
+                "-o", str(output_dir / safe_title),
+                url
+            ]
+            subprocess.run(cmd, capture_output=True, text=True)
+
+            if subtitle_path.exists():
+                return subtitle_path, lang
+
+        # 嘗試自動字幕
+        if lang in auto_subs:
+            cmd = [
+                "yt-dlp",
+                "--write-auto-sub",
+                "--sub-lang", lang,
+                "--sub-format", "srt",
+                "--skip-download",
+                "-o", str(output_dir / safe_title),
+                url
+            ]
+            subprocess.run(cmd, capture_output=True, text=True)
+
+            if subtitle_path.exists():
+                return subtitle_path, lang
+
+    return None, ""
 
 # ==================== Gemini 翻譯（使用 REST API）====================
 
@@ -181,7 +227,7 @@ def call_gemini_api(prompt: str) -> str:
         }
     }
 
-    response = requests.post(url, headers=headers, json=data, timeout=60)
+    response = requests.post(url, headers=headers, json=data, timeout=120)
 
     if response.status_code != 200:
         raise RuntimeError(f"Gemini API 錯誤: {response.text}")
@@ -189,8 +235,32 @@ def call_gemini_api(prompt: str) -> str:
     result = response.json()
     return result["candidates"][0]["content"]["parts"][0]["text"]
 
-def translate_subtitles(srt_content: str, source_lang: str = "en", target_lang: str = "zh-TW") -> list:
-    """使用 Gemini 翻譯字幕"""
+def get_language_name(lang_code: str) -> str:
+    """取得語言名稱"""
+    lang_names = {
+        "zh-TW": "繁體中文",
+        "zh-CN": "簡體中文",
+        "en": "英文",
+        "ja": "日文",
+        "ko": "韓文",
+        "fr": "法文",
+        "de": "德文",
+        "es": "西班牙文",
+        "pt": "葡萄牙文",
+        "ru": "俄文",
+        "it": "義大利文",
+        "nl": "荷蘭文",
+        "ar": "阿拉伯文",
+        "hi": "印地文",
+        "th": "泰文",
+        "vi": "越南文",
+        "id": "印尼文",
+        "ms": "馬來文",
+    }
+    return lang_names.get(lang_code, lang_code)
+
+def translate_subtitles(srt_content: str, source_lang: str, target_lang: str) -> list:
+    """使用 Gemini 翻譯字幕（支援任意語言對）"""
     # 解析 SRT
     blocks = srt_content.strip().split('\n\n')
     entries = []
@@ -213,6 +283,9 @@ def translate_subtitles(srt_content: str, source_lang: str = "en", target_lang: 
     if not entries:
         return []
 
+    source_name = get_language_name(source_lang)
+    target_name = get_language_name(target_lang)
+
     # 分批翻譯
     batch_size = 30
     translated_entries = []
@@ -222,8 +295,11 @@ def translate_subtitles(srt_content: str, source_lang: str = "en", target_lang: 
         texts = [e['text'] for e in batch]
         texts_json = json.dumps(texts, ensure_ascii=False)
 
-        prompt = f"""請將以下 JSON 陣列中的字幕從 {source_lang} 翻譯成繁體中文。
-要求：保持語氣、自然流暢、直接回傳 JSON 陣列，不要有其他文字。
+        prompt = f"""請將以下 JSON 陣列中的字幕從「{source_name}」翻譯成「{target_name}」。
+要求：
+1. 保持原有的語氣和風格
+2. 翻譯要自然流暢
+3. 直接回傳 JSON 陣列，不要有其他文字或 markdown 標記
 
 原文：{texts_json}
 
@@ -233,9 +309,12 @@ def translate_subtitles(srt_content: str, source_lang: str = "en", target_lang: 
             response_text = call_gemini_api(prompt)
             response_text = response_text.strip()
 
+            # 清理可能的 markdown 標記
             if response_text.startswith("```"):
                 lines = response_text.split("\n")
                 response_text = "\n".join(lines[1:-1])
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
 
             translated_texts = json.loads(response_text)
 
@@ -275,7 +354,6 @@ def generate_srt(entries: list, include_original: bool = True, include_translati
 def embed_subtitles(video_path: Path, subtitle_path: Path, output_path: Path,
                    font_size: int = 24) -> Path:
     """將字幕嵌入影片"""
-    # 轉義路徑
     sub_path_str = str(subtitle_path.absolute()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
 
     cmd = [
@@ -299,39 +377,37 @@ def embed_subtitles(video_path: Path, subtitle_path: Path, output_path: Path,
 
 # ==================== 主要功能 ====================
 
-def process_bilingual_video(url: str, quality: str, progress=gr.Progress()) -> Tuple[str, str]:
+def process_bilingual_video(url: str, quality: str, source_lang: str, target_lang: str, progress=gr.Progress()) -> Tuple[str, str]:
     """功能1: 產生雙語字幕影片"""
     try:
         progress(0, desc="開始處理...")
         Config.ensure_directories()
 
-        # 下載影片
+        source_code = SUPPORTED_LANGUAGES.get(source_lang, "en")
+        target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
+
         progress(0.1, desc="下載影片中...")
         video_path, info = download_video(url, Config.TEMP_DIR, quality)
         title = sanitize_filename(info.get("title", "video"))
 
-        # 下載或生成字幕
         progress(0.3, desc="取得字幕中...")
-        subtitle_path = download_existing_subtitles(url, Config.TEMP_DIR, "en")
+        subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
-        if subtitle_path and subtitle_path.exists():
-            with open(subtitle_path, 'r', encoding='utf-8') as f:
-                srt_content = f.read()
-        else:
-            return None, "無法取得字幕，請確認影片有英文字幕"
+        if not subtitle_path or not subtitle_path.exists():
+            return None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
 
-        # 翻譯
-        progress(0.5, desc="AI 翻譯中...")
-        entries = translate_subtitles(srt_content)
+        with open(subtitle_path, 'r', encoding='utf-8') as f:
+            srt_content = f.read()
 
-        # 生成雙語字幕
+        progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
+        entries = translate_subtitles(srt_content, detected_lang, target_code)
+
         progress(0.7, desc="生成字幕檔...")
         bilingual_srt = generate_srt(entries, include_original=True, include_translation=True)
         bilingual_path = Config.TEMP_DIR / f"{title}_bilingual.srt"
         with open(bilingual_path, 'w', encoding='utf-8') as f:
             f.write(bilingual_srt)
 
-        # 嵌入字幕
         progress(0.8, desc="嵌入字幕中（這需要一點時間）...")
         output_path = Config.OUTPUT_DIR / f"{title}_雙語字幕.mp4"
         embed_subtitles(video_path, bilingual_path, output_path)
@@ -342,42 +418,43 @@ def process_bilingual_video(url: str, quality: str, progress=gr.Progress()) -> T
     except Exception as e:
         return None, f"❌ 錯誤：{str(e)}"
 
-def process_single_lang_video(url: str, quality: str, language: str, progress=gr.Progress()) -> Tuple[str, str]:
+def process_single_lang_video(url: str, quality: str, source_lang: str, target_lang: str, progress=gr.Progress()) -> Tuple[str, str]:
     """功能2: 產生單語字幕影片"""
     try:
         progress(0, desc="開始處理...")
         Config.ensure_directories()
+
+        source_code = SUPPORTED_LANGUAGES.get(source_lang, "en")
+        target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
 
         progress(0.1, desc="下載影片中...")
         video_path, info = download_video(url, Config.TEMP_DIR, quality)
         title = sanitize_filename(info.get("title", "video"))
 
         progress(0.3, desc="取得字幕中...")
-        subtitle_path = download_existing_subtitles(url, Config.TEMP_DIR, "en")
+        subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
         if not subtitle_path or not subtitle_path.exists():
-            return None, "無法取得字幕"
+            return None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
 
         with open(subtitle_path, 'r', encoding='utf-8') as f:
             srt_content = f.read()
 
-        if language == "中文":
-            progress(0.5, desc="AI 翻譯中...")
-            entries = translate_subtitles(srt_content)
-            final_srt = generate_srt(entries, include_original=False, include_translation=True)
-            lang_label = "中文字幕"
-        else:
-            # 英文，直接使用原始字幕
+        # 如果來源和目標語言相同，不需要翻譯
+        if source_code == target_code:
             final_srt = srt_content
-            lang_label = "英文字幕"
+        else:
+            progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
+            entries = translate_subtitles(srt_content, detected_lang, target_code)
+            final_srt = generate_srt(entries, include_original=False, include_translation=True)
 
         progress(0.7, desc="生成字幕檔...")
-        srt_path = Config.TEMP_DIR / f"{title}_{language}.srt"
+        srt_path = Config.TEMP_DIR / f"{title}_{target_lang}.srt"
         with open(srt_path, 'w', encoding='utf-8') as f:
             f.write(final_srt)
 
         progress(0.8, desc="嵌入字幕中...")
-        output_path = Config.OUTPUT_DIR / f"{title}_{lang_label}.mp4"
+        output_path = Config.OUTPUT_DIR / f"{title}_{target_lang}字幕.mp4"
         embed_subtitles(video_path, srt_path, output_path)
 
         progress(1.0, desc="完成！")
@@ -401,48 +478,51 @@ def process_to_mp3(url: str, progress=gr.Progress()) -> Tuple[str, str]:
     except Exception as e:
         return None, f"❌ 錯誤：{str(e)}"
 
-def process_subtitles_only(url: str, output_format: str, progress=gr.Progress()) -> Tuple[str, str, str, str]:
+def process_subtitles_only(url: str, source_lang: str, target_lang: str, progress=gr.Progress()) -> Tuple[str, str, str, str]:
     """功能4: 只輸出字幕檔"""
     try:
         progress(0, desc="開始處理...")
         Config.ensure_directories()
+
+        source_code = SUPPORTED_LANGUAGES.get(source_lang, "en")
+        target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
 
         progress(0.2, desc="取得影片資訊...")
         info = get_video_info(url)
         title = sanitize_filename(info.get("title", "video"))
 
         progress(0.3, desc="下載字幕中...")
-        subtitle_path = download_existing_subtitles(url, Config.TEMP_DIR, "en")
+        subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
         if not subtitle_path or not subtitle_path.exists():
-            return None, None, None, "無法取得字幕"
+            return None, None, None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
 
         with open(subtitle_path, 'r', encoding='utf-8') as f:
             srt_content = f.read()
 
-        progress(0.5, desc="AI 翻譯中...")
-        entries = translate_subtitles(srt_content)
+        progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
+        entries = translate_subtitles(srt_content, detected_lang, target_code)
 
         progress(0.8, desc="生成字幕檔...")
 
         # 生成各種版本
-        zh_srt = generate_srt(entries, include_original=False, include_translation=True)
-        en_srt = generate_srt(entries, include_original=True, include_translation=False)
+        translated_srt = generate_srt(entries, include_original=False, include_translation=True)
+        original_srt = generate_srt(entries, include_original=True, include_translation=False)
         bilingual_srt = generate_srt(entries, include_original=True, include_translation=True)
 
-        zh_path = Config.OUTPUT_DIR / f"{title}_中文.srt"
-        en_path = Config.OUTPUT_DIR / f"{title}_英文.srt"
+        translated_path = Config.OUTPUT_DIR / f"{title}_{target_lang}.srt"
+        original_path = Config.OUTPUT_DIR / f"{title}_{source_lang}.srt"
         bilingual_path = Config.OUTPUT_DIR / f"{title}_雙語.srt"
 
-        with open(zh_path, 'w', encoding='utf-8') as f:
-            f.write(zh_srt)
-        with open(en_path, 'w', encoding='utf-8') as f:
-            f.write(en_srt)
+        with open(translated_path, 'w', encoding='utf-8') as f:
+            f.write(translated_srt)
+        with open(original_path, 'w', encoding='utf-8') as f:
+            f.write(original_srt)
         with open(bilingual_path, 'w', encoding='utf-8') as f:
             f.write(bilingual_srt)
 
         progress(1.0, desc="完成！")
-        return str(zh_path), str(en_path), str(bilingual_path), f"✅ 完成！字幕檔已儲存到 {Config.OUTPUT_DIR}"
+        return str(translated_path), str(original_path), str(bilingual_path), f"✅ 完成！字幕檔已儲存到 {Config.OUTPUT_DIR}"
 
     except Exception as e:
         return None, None, None, f"❌ 錯誤：{str(e)}"
@@ -459,25 +539,22 @@ def save_api_key(api_key: str) -> str:
 def create_ui():
     """建立 Gradio 介面"""
 
+    lang_choices = list(SUPPORTED_LANGUAGES.keys())
+
     with gr.Blocks(
         title="YouTube 字幕轉換器",
         theme=gr.themes.Soft(),
-        css="""
-        .main-title { text-align: center; margin-bottom: 20px; }
-        .tab-content { padding: 20px; }
-        """
     ) as app:
 
         gr.Markdown(
             """
             # 🎬 YouTube 字幕轉換器
-            ### 輕鬆將 YouTube 影片轉換為帶有中英文字幕的版本
-            """,
-            elem_classes="main-title"
+            ### 輕鬆將 YouTube 影片字幕翻譯成任何語言
+            """
         )
 
         # API 金鑰設定
-        with gr.Accordion("⚙️ 設定 Gemini API 金鑰（首次使用請先設定）", open=False):
+        with gr.Accordion("⚙️ 設定 Gemini API 金鑰（已預設，可略過）", open=False):
             with gr.Row():
                 api_key_input = gr.Textbox(
                     label="Gemini API 金鑰",
@@ -496,28 +573,31 @@ def create_ui():
 
             # 功能1: 雙語字幕影片
             with gr.Tab("🌐 雙語字幕影片"):
-                gr.Markdown("### 將 YouTube 影片轉換為中英雙語字幕版本")
+                gr.Markdown("### 將 YouTube 影片轉換為雙語字幕版本")
+                url1 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
                 with gr.Row():
-                    url1 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...", scale=4)
+                    source_lang1 = gr.Dropdown(choices=lang_choices, value="英文", label="原始字幕語言", scale=1)
+                    target_lang1 = gr.Dropdown(choices=lang_choices, value="中文（繁體）", label="翻譯成", scale=1)
                     quality1 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
                 btn1 = gr.Button("🚀 開始轉換", variant="primary")
                 output1_video = gr.File(label="下載影片")
                 output1_status = gr.Textbox(label="狀態")
 
-                btn1.click(process_bilingual_video, inputs=[url1, quality1], outputs=[output1_video, output1_status])
+                btn1.click(process_bilingual_video, inputs=[url1, quality1, source_lang1, target_lang1], outputs=[output1_video, output1_status])
 
             # 功能2: 單語字幕影片
             with gr.Tab("🔤 單語字幕影片"):
                 gr.Markdown("### 將 YouTube 影片轉換為單一語言字幕版本")
+                url2 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
                 with gr.Row():
-                    url2 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...", scale=3)
+                    source_lang2 = gr.Dropdown(choices=lang_choices, value="英文", label="原始字幕語言", scale=1)
+                    target_lang2 = gr.Dropdown(choices=lang_choices, value="中文（繁體）", label="翻譯成", scale=1)
                     quality2 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
-                    lang2 = gr.Dropdown(choices=["中文", "英文"], value="中文", label="字幕語言", scale=1)
                 btn2 = gr.Button("🚀 開始轉換", variant="primary")
                 output2_video = gr.File(label="下載影片")
                 output2_status = gr.Textbox(label="狀態")
 
-                btn2.click(process_single_lang_video, inputs=[url2, quality2, lang2], outputs=[output2_video, output2_status])
+                btn2.click(process_single_lang_video, inputs=[url2, quality2, source_lang2, target_lang2], outputs=[output2_video, output2_status])
 
             # 功能3: YouTube 轉 MP3
             with gr.Tab("🎵 YouTube 轉 MP3"):
@@ -533,30 +613,31 @@ def create_ui():
             with gr.Tab("📝 只要字幕檔"):
                 gr.Markdown("### 取得 YouTube 影片的字幕檔（不下載影片）")
                 url4 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
-                format4 = gr.Dropdown(choices=["SRT"], value="SRT", label="字幕格式")
+                with gr.Row():
+                    source_lang4 = gr.Dropdown(choices=lang_choices, value="英文", label="原始字幕語言", scale=1)
+                    target_lang4 = gr.Dropdown(choices=lang_choices, value="中文（繁體）", label="翻譯成", scale=1)
                 btn4 = gr.Button("🚀 開始轉換", variant="primary")
                 with gr.Row():
-                    output4_zh = gr.File(label="中文字幕")
-                    output4_en = gr.File(label="英文字幕")
+                    output4_translated = gr.File(label="翻譯字幕")
+                    output4_original = gr.File(label="原始字幕")
                     output4_bilingual = gr.File(label="雙語字幕")
                 output4_status = gr.Textbox(label="狀態")
 
-                btn4.click(process_subtitles_only, inputs=[url4, format4], outputs=[output4_zh, output4_en, output4_bilingual, output4_status])
+                btn4.click(process_subtitles_only, inputs=[url4, source_lang4, target_lang4], outputs=[output4_translated, output4_original, output4_bilingual, output4_status])
 
         gr.Markdown(
             """
             ---
             ### 使用說明
-            1. **首次使用**：請先在上方設定 Gemini API 金鑰
-            2. **貼上網址**：將 YouTube 影片網址貼到輸入框
-            3. **選擇功能**：切換不同分頁選擇你需要的功能
-            4. **等待處理**：點擊開始後等待處理完成
-            5. **下載檔案**：處理完成後點擊下載
+            1. **貼上網址**：將 YouTube 影片網址貼到輸入框
+            2. **選擇語言**：選擇原始字幕語言和要翻譯成的語言
+            3. **開始轉換**：點擊按鈕等待處理完成
+            4. **下載檔案**：處理完成後點擊下載
 
-            ⚠️ **注意事項**：
-            - 影片長度建議在 30 分鐘以內
-            - 需要影片本身有英文字幕才能翻譯
-            - 處理時間依影片長度而定
+            ### 支援語言
+            中文（繁體/簡體）、英文、日文、韓文、法文、德文、西班牙文、葡萄牙文、俄文、義大利文、荷蘭文、阿拉伯文、印地文、泰文、越南文、印尼文、馬來文
+
+            ⚠️ **注意**：影片必須有字幕（手動或自動產生）才能進行翻譯
             """
         )
 
