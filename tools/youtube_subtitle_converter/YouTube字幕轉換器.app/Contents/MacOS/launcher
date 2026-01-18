@@ -1,12 +1,7 @@
 #!/bin/bash
 # YouTube 字幕轉換器 - Mac App 啟動器
-# 使用 AppleScript 在 Terminal 中執行
 
-APP_DIR="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter"
+SCRIPT_PATH="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter/YouTube字幕轉換器.app/Contents/Resources/start.sh"
 
-osascript <<EOF
-tell application "Terminal"
-    activate
-    do script "cd '$APP_DIR' && clear && echo '' && echo '  ╔═══════════════════════════════════════════════════════╗' && echo '  ║                                                       ║' && echo '  ║   ▶ YouTube  字幕轉換器                               ║' && echo '  ║                                                       ║' && echo '  ║   AI 智慧翻譯 · 多語言支援 · 一鍵產生字幕             ║' && echo '  ║                                                       ║' && echo '  ╚═══════════════════════════════════════════════════════╝' && echo '' && lsof -ti:7860 | xargs kill -9 2>/dev/null; rm -rf __pycache__ .gradio 2>/dev/null; echo '  🚀 正在啟動服務...' && echo '' && python3 web_app.py & sleep 4 && open 'http://localhost:7860' && echo '' && echo '  ✅ 服務已啟動！' && echo '' && echo '  📍 本機網址: http://localhost:7860' && echo '' && echo '  💡 提示: 按 Ctrl+C 可以關閉服務' && echo '' && wait"
-end tell
-EOF
+osascript -e "tell application \"Terminal\" to do script \"bash '$SCRIPT_PATH'\""
+osascript -e "tell application \"Terminal\" to activate"
