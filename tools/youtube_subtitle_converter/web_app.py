@@ -647,7 +647,7 @@ def process_to_mp3(url: str, progress=gr.Progress()) -> Tuple[str, str]:
     except Exception as e:
         return None, f"❌ 錯誤：{str(e)}"
 
-def process_subtitles_only(url: str, source_lang: str, target_langs: list, progress=gr.Progress()) -> Tuple[str, str, str, str, str]:
+def process_subtitles_only(url: str, source_lang: str, target_langs: list, progress=gr.Progress()):
     """功能4: 只輸出字幕檔（支援多語言）"""
     try:
         progress(0, desc="開始處理...")
@@ -711,13 +711,12 @@ def process_subtitles_only(url: str, source_lang: str, target_langs: list, progr
         progress(1.0, desc="完成！")
 
         results_text = "\n---\n".join(all_results)
-        files_text = "\n".join([f"- {f}" for f in saved_files])
-        status = f"✅ 完成！已翻譯成 {total_langs} 種語言\n\n📁 已儲存的檔案：\n{files_text}"
+        status = f"✅ 完成！已翻譯成 {total_langs} 種語言"
 
-        return results_text, status
+        return saved_files, results_text, status
 
     except Exception as e:
-        return f"❌ 錯誤：{str(e)}", f"❌ 錯誤：{str(e)}"
+        return [], f"❌ 錯誤：{str(e)}", f"❌ 錯誤：{str(e)}"
 
 def save_api_key(api_key: str) -> str:
     """儲存 API 金鑰"""
@@ -815,14 +814,16 @@ def create_ui():
                         scale=2
                     )
                 btn4 = gr.Button("🚀 開始翻譯", variant="primary")
-                output4_status = gr.Textbox(label="狀態", lines=6)
-                gr.Markdown("### 翻譯結果預覽")
+                output4_status = gr.Textbox(label="狀態", lines=2)
+                gr.Markdown("### 📥 下載字幕檔")
+                output4_files = gr.Files(label="字幕檔案（點擊下載）")
+                gr.Markdown("### 📄 翻譯結果預覽")
                 output4_results = gr.Markdown(label="翻譯結果")
 
                 btn4.click(
                     process_subtitles_only,
                     inputs=[url4, source_lang4, target_langs4],
-                    outputs=[output4_results, output4_status]
+                    outputs=[output4_files, output4_results, output4_status]
                 )
 
         gr.Markdown(
