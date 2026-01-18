@@ -853,12 +853,49 @@ def create_ui():
     with gr.Blocks(
         title="YouTube 字幕轉換器",
         theme=gr.themes.Soft(),
+        css="""
+        .header-container {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .header-title {
+            color: white;
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .header-subtitle {
+            color: rgba(255,255,255,0.9);
+            font-size: 1.2em;
+            margin-top: 8px;
+        }
+        .youtube-icon {
+            display: inline-block;
+            background: white;
+            color: #ff0000;
+            padding: 5px 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        """
     ) as app:
 
-        gr.Markdown(
+        gr.HTML(
             """
-            # 🎬 YouTube 字幕轉換器
-            ### 輕鬆將 YouTube 影片字幕翻譯成任何語言
+            <div class="header-container">
+                <p class="header-title">
+                    <span class="youtube-icon">▶ YouTube</span>
+                    字幕轉換器
+                </p>
+                <p class="header-subtitle">
+                    AI 智慧翻譯 · 多語言支援 · 一鍵產生字幕
+                </p>
+            </div>
             """
         )
 
