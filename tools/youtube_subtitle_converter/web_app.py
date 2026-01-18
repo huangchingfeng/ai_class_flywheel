@@ -487,27 +487,44 @@ def generate_srt(entries: list, include_original: bool = True, include_translati
 
 def embed_subtitles(video_path: Path, subtitle_path: Path, output_path: Path,
                    font_size: int = 24) -> Path:
-    """將字幕嵌入影片"""
-    sub_path_str = str(subtitle_path.absolute()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    """將字幕嵌入影片（使用安全的臨時檔案避免特殊字元問題）"""
+    # 為了避免 FFmpeg 字幕濾鏡的特殊字元問題，
+    # 將字幕檔複製到一個安全名稱的臨時檔案
+    import uuid
+    safe_name = f"subtitle_{uuid.uuid4().hex}.srt"
+    safe_subtitle_path = Config.TEMP_DIR / safe_name
 
-    cmd = [
-        "ffmpeg",
-        "-i", str(video_path),
-        "-vf", f"subtitles='{sub_path_str}':force_style='FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2'",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-y",
-        str(output_path)
-    ]
+    try:
+        # 複製字幕檔到安全路徑
+        shutil.copy2(subtitle_path, safe_subtitle_path)
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"嵌入字幕失敗: {result.stderr}")
+        # 使用絕對路徑並進行 FFmpeg 所需的跳脫
+        sub_path_str = str(safe_subtitle_path.absolute())
+        # FFmpeg subtitles filter 需要跳脫冒號和反斜線
+        sub_path_str = sub_path_str.replace("\\", "/").replace(":", "\\:")
 
-    return output_path
+        cmd = [
+            "ffmpeg",
+            "-i", str(video_path),
+            "-vf", f"subtitles='{sub_path_str}':force_style='FontSize={font_size},PrimaryColour=&HFFFFFF,OutlineColour=&H000000,Outline=2'",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "23",
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-y",
+            str(output_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"嵌入字幕失敗: {result.stderr}")
+
+        return output_path
+    finally:
+        # 清理臨時字幕檔
+        if safe_subtitle_path.exists():
+            safe_subtitle_path.unlink()
 
 # ==================== 主要功能 ====================
 
@@ -734,7 +751,7 @@ def create_ui():
                     quality1 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
                 btn1 = gr.Button("🚀 開始轉換", variant="primary")
                 output1_video = gr.File(label="下載影片")
-                output1_status = gr.Textbox(label="狀態")
+                output1_status = gr.Textbox(label="狀態", show_copy_button=True)
 
                 btn1.click(process_bilingual_video, inputs=[url1, quality1, source_lang1, target_lang1], outputs=[output1_video, output1_status])
 
@@ -748,7 +765,7 @@ def create_ui():
                     quality2 = gr.Dropdown(choices=["480p", "720p", "1080p"], value="720p", label="畫質", scale=1)
                 btn2 = gr.Button("🚀 開始轉換", variant="primary")
                 output2_video = gr.File(label="下載影片")
-                output2_status = gr.Textbox(label="狀態")
+                output2_status = gr.Textbox(label="狀態", show_copy_button=True)
 
                 btn2.click(process_single_lang_video, inputs=[url2, quality2, source_lang2, target_lang2], outputs=[output2_video, output2_status])
 
@@ -758,7 +775,7 @@ def create_ui():
                 url3 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
                 btn3 = gr.Button("🚀 開始轉換", variant="primary")
                 output3_audio = gr.File(label="下載 MP3")
-                output3_status = gr.Textbox(label="狀態")
+                output3_status = gr.Textbox(label="狀態", show_copy_button=True)
 
                 btn3.click(process_to_mp3, inputs=[url3], outputs=[output3_audio, output3_status])
 
@@ -774,7 +791,7 @@ def create_ui():
                     output4_translated = gr.File(label="翻譯字幕")
                     output4_original = gr.File(label="原始字幕")
                     output4_bilingual = gr.File(label="雙語字幕")
-                output4_status = gr.Textbox(label="狀態")
+                output4_status = gr.Textbox(label="狀態", show_copy_button=True)
 
                 btn4.click(process_subtitles_only, inputs=[url4, source_lang4, target_lang4], outputs=[output4_translated, output4_original, output4_bilingual, output4_status])
 
