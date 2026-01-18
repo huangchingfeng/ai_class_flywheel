@@ -395,30 +395,44 @@ def get_language_name(lang_code: str) -> str:
 
 def translate_subtitles(srt_content: str, source_lang: str, target_lang: str) -> list:
     """使用 Gemini 翻譯字幕（支援任意語言對）"""
-    # 解析 SRT
+    # 解析 SRT - 支援多種格式
     blocks = srt_content.strip().split('\n\n')
     entries = []
 
     for block in blocks:
         lines = block.strip().split('\n')
-        if len(lines) >= 3:
+        if len(lines) >= 2:
             try:
-                index = int(lines[0].strip())
-                time_line = lines[1].strip()
-                text = ' '.join(lines[2:]).strip()
-                entries.append({
-                    'index': index,
-                    'time': time_line,
-                    'text': text
-                })
+                # 嘗試解析標準 SRT 格式
+                if len(lines) >= 3 and '-->' in lines[1]:
+                    index = int(lines[0].strip())
+                    time_line = lines[1].strip()
+                    text = ' '.join(lines[2:]).strip()
+                elif len(lines) >= 2 and '-->' in lines[0]:
+                    # 沒有序號的格式
+                    index = len(entries) + 1
+                    time_line = lines[0].strip()
+                    text = ' '.join(lines[1:]).strip()
+                else:
+                    continue
+
+                if text:  # 確保有文字內容
+                    entries.append({
+                        'index': index,
+                        'time': time_line,
+                        'text': text
+                    })
             except:
                 continue
 
     if not entries:
+        print(f"警告：無法解析字幕內容，原始內容前 500 字：{srt_content[:500]}")
         return []
 
     source_name = get_language_name(source_lang)
     target_name = get_language_name(target_lang)
+
+    print(f"開始翻譯：{source_name} → {target_name}，共 {len(entries)} 條字幕")
 
     # 分批翻譯
     batch_size = 30
@@ -434,6 +448,7 @@ def translate_subtitles(srt_content: str, source_lang: str, target_lang: str) ->
 1. 保持原有的語氣和風格
 2. 翻譯要自然流暢
 3. 直接回傳 JSON 陣列，不要有其他文字或 markdown 標記
+4. 陣列長度必須與原文相同
 
 原文：{texts_json}
 
@@ -448,17 +463,27 @@ def translate_subtitles(srt_content: str, source_lang: str, target_lang: str) ->
                 lines = response_text.split("\n")
                 response_text = "\n".join(lines[1:-1])
             if response_text.startswith("json"):
-                response_text = response_text[4:]
+                response_text = response_text[4:].strip()
 
             translated_texts = json.loads(response_text)
 
-            for entry, trans in zip(batch, translated_texts):
-                entry['translated'] = trans
+            if len(translated_texts) != len(batch):
+                print(f"警告：翻譯結果數量不符，預期 {len(batch)}，實際 {len(translated_texts)}")
+
+            for j, entry in enumerate(batch):
+                if j < len(translated_texts):
+                    entry['translated'] = translated_texts[j]
+                else:
+                    entry['translated'] = entry['text']
                 translated_entries.append(entry)
+
+            print(f"翻譯進度：{len(translated_entries)}/{len(entries)}")
+
         except Exception as e:
             print(f"翻譯錯誤: {e}")
+            print(f"API 回應：{response_text[:200] if 'response_text' in dir() else 'N/A'}")
             for entry in batch:
-                entry['translated'] = entry['text']
+                entry['translated'] = f"[翻譯失敗] {entry['text']}"
                 translated_entries.append(entry)
 
         time.sleep(0.5)
