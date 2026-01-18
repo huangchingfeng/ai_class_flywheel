@@ -209,7 +209,141 @@ def download_subtitles_any_language(url: str, output_dir: Path, preferred_lang: 
 
     return None, ""
 
-# ==================== Gemini 翻譯（使用 REST API）====================
+# ==================== Gemini API ====================
+
+def upload_file_to_gemini(file_path: Path) -> str:
+    """上傳檔案到 Gemini File API"""
+    if not Config.GEMINI_API_KEY:
+        raise ValueError("請先設定 Gemini API 金鑰")
+
+    # 上傳檔案
+    upload_url = f"https://generativelanguage.googleapis.com/upload/v1beta/files?key={Config.GEMINI_API_KEY}"
+
+    with open(file_path, 'rb') as f:
+        file_content = f.read()
+
+    # 確定 MIME 類型
+    suffix = file_path.suffix.lower()
+    mime_types = {
+        '.mp3': 'audio/mpeg',
+        '.m4a': 'audio/mp4',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.flac': 'audio/flac',
+    }
+    mime_type = mime_types.get(suffix, 'audio/mpeg')
+
+    headers = {
+        'X-Goog-Upload-Command': 'start, upload, finalize',
+        'X-Goog-Upload-Header-Content-Length': str(len(file_content)),
+        'X-Goog-Upload-Header-Content-Type': mime_type,
+        'Content-Type': 'application/json',
+    }
+
+    metadata = json.dumps({'file': {'display_name': file_path.name}})
+
+    # 使用 multipart upload
+    response = requests.post(
+        upload_url,
+        headers={
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': str(len(file_content)),
+            'X-Goog-Upload-Header-Content-Type': mime_type,
+            'Content-Type': 'application/json',
+        },
+        data=metadata,
+        timeout=60
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(f"上傳初始化失敗: {response.text}")
+
+    upload_uri = response.headers.get('X-Goog-Upload-URL')
+
+    # 上傳檔案內容
+    response = requests.post(
+        upload_uri,
+        headers={
+            'X-Goog-Upload-Command': 'upload, finalize',
+            'X-Goog-Upload-Offset': '0',
+            'Content-Type': mime_type,
+        },
+        data=file_content,
+        timeout=300
+    )
+
+    if response.status_code != 200:
+        raise RuntimeError(f"檔案上傳失敗: {response.text}")
+
+    result = response.json()
+    return result['file']['uri']
+
+def transcribe_audio_with_gemini(audio_path: Path, source_lang: str = "en") -> str:
+    """使用 Gemini 進行語音辨識，產生 SRT 格式字幕"""
+    if not Config.GEMINI_API_KEY:
+        raise ValueError("請先設定 Gemini API 金鑰")
+
+    print(f"正在上傳音訊檔案進行語音辨識...")
+
+    # 上傳檔案
+    file_uri = upload_file_to_gemini(audio_path)
+
+    print(f"檔案已上傳，正在進行語音辨識...")
+
+    # 使用 Gemini 進行語音辨識
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent?key={Config.GEMINI_API_KEY}"
+
+    source_name = get_language_name(source_lang)
+
+    prompt = f"""請聽這段音訊，並將其轉錄成文字。
+
+要求：
+1. 辨識音訊中的{source_name}語音內容
+2. 產生 SRT 字幕格式
+3. 每段字幕約 5-10 秒
+4. 時間戳格式：00:00:00,000 --> 00:00:05,000
+5. 只輸出 SRT 格式內容，不要有其他說明文字
+
+輸出格式範例：
+1
+00:00:00,000 --> 00:00:05,000
+第一段字幕內容
+
+2
+00:00:05,000 --> 00:00:10,000
+第二段字幕內容
+
+請開始轉錄："""
+
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{
+            "parts": [
+                {"file_data": {"mime_type": "audio/mpeg", "file_uri": file_uri}},
+                {"text": prompt}
+            ]
+        }],
+        "generationConfig": {
+            "temperature": 0.2,
+            "maxOutputTokens": 8192
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=data, timeout=300)
+
+    if response.status_code != 200:
+        raise RuntimeError(f"語音辨識失敗: {response.text}")
+
+    result = response.json()
+    srt_content = result["candidates"][0]["content"]["parts"][0]["text"]
+
+    # 清理可能的 markdown 標記
+    if srt_content.startswith("```"):
+        lines = srt_content.split("\n")
+        srt_content = "\n".join(lines[1:-1])
+
+    return srt_content
 
 def call_gemini_api(prompt: str) -> str:
     """直接調用 Gemini REST API"""
@@ -390,14 +524,21 @@ def process_bilingual_video(url: str, quality: str, source_lang: str, target_lan
         video_path, info = download_video(url, Config.TEMP_DIR, quality)
         title = sanitize_filename(info.get("title", "video"))
 
-        progress(0.3, desc="取得字幕中...")
+        progress(0.2, desc="取得字幕中...")
         subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
-        if not subtitle_path or not subtitle_path.exists():
-            return None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
+        if subtitle_path and subtitle_path.exists():
+            # 有現有字幕，直接使用
+            with open(subtitle_path, 'r', encoding='utf-8') as f:
+                srt_content = f.read()
+        else:
+            # 沒有現有字幕，使用 AI 語音辨識
+            progress(0.3, desc="沒有找到現有字幕，正在下載音訊...")
+            audio_path, _ = download_audio(url, Config.TEMP_DIR)
 
-        with open(subtitle_path, 'r', encoding='utf-8') as f:
-            srt_content = f.read()
+            progress(0.4, desc="AI 語音辨識中（這可能需要幾分鐘）...")
+            srt_content = transcribe_audio_with_gemini(audio_path, source_code)
+            detected_lang = source_code
 
         progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
         entries = translate_subtitles(srt_content, detected_lang, target_code)
@@ -431,14 +572,20 @@ def process_single_lang_video(url: str, quality: str, source_lang: str, target_l
         video_path, info = download_video(url, Config.TEMP_DIR, quality)
         title = sanitize_filename(info.get("title", "video"))
 
-        progress(0.3, desc="取得字幕中...")
+        progress(0.2, desc="取得字幕中...")
         subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
-        if not subtitle_path or not subtitle_path.exists():
-            return None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
+        if subtitle_path and subtitle_path.exists():
+            with open(subtitle_path, 'r', encoding='utf-8') as f:
+                srt_content = f.read()
+        else:
+            # 沒有現有字幕，使用 AI 語音辨識
+            progress(0.3, desc="沒有找到現有字幕，正在下載音訊...")
+            audio_path, _ = download_audio(url, Config.TEMP_DIR)
 
-        with open(subtitle_path, 'r', encoding='utf-8') as f:
-            srt_content = f.read()
+            progress(0.4, desc="AI 語音辨識中（這可能需要幾分鐘）...")
+            srt_content = transcribe_audio_with_gemini(audio_path, source_code)
+            detected_lang = source_code
 
         # 如果來源和目標語言相同，不需要翻譯
         if source_code == target_code:
@@ -491,14 +638,20 @@ def process_subtitles_only(url: str, source_lang: str, target_lang: str, progres
         info = get_video_info(url)
         title = sanitize_filename(info.get("title", "video"))
 
-        progress(0.3, desc="下載字幕中...")
+        progress(0.2, desc="下載字幕中...")
         subtitle_path, detected_lang = download_subtitles_any_language(url, Config.TEMP_DIR, source_code)
 
-        if not subtitle_path or not subtitle_path.exists():
-            return None, None, None, f"❌ 無法取得字幕。此影片可能沒有 {source_lang} 字幕。"
+        if subtitle_path and subtitle_path.exists():
+            with open(subtitle_path, 'r', encoding='utf-8') as f:
+                srt_content = f.read()
+        else:
+            # 沒有現有字幕，使用 AI 語音辨識
+            progress(0.3, desc="沒有找到現有字幕，正在下載音訊...")
+            audio_path, _ = download_audio(url, Config.TEMP_DIR)
 
-        with open(subtitle_path, 'r', encoding='utf-8') as f:
-            srt_content = f.read()
+            progress(0.4, desc="AI 語音辨識中（這可能需要幾分鐘）...")
+            srt_content = transcribe_audio_with_gemini(audio_path, source_code)
+            detected_lang = source_code
 
         progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
         entries = translate_subtitles(srt_content, detected_lang, target_code)
@@ -630,14 +783,16 @@ def create_ui():
             ---
             ### 使用說明
             1. **貼上網址**：將 YouTube 影片網址貼到輸入框
-            2. **選擇語言**：選擇原始字幕語言和要翻譯成的語言
+            2. **選擇語言**：選擇原始語言和要翻譯成的語言
             3. **開始轉換**：點擊按鈕等待處理完成
             4. **下載檔案**：處理完成後點擊下載
 
             ### 支援語言
             中文（繁體/簡體）、英文、日文、韓文、法文、德文、西班牙文、葡萄牙文、俄文、義大利文、荷蘭文、阿拉伯文、印地文、泰文、越南文、印尼文、馬來文
 
-            ⚠️ **注意**：影片必須有字幕（手動或自動產生）才能進行翻譯
+            ### 智慧字幕處理
+            - ✅ 有現有字幕：直接下載並翻譯（速度較快）
+            - ✅ 沒有字幕：自動使用 AI 語音辨識產生字幕（需要較長時間）
             """
         )
 
