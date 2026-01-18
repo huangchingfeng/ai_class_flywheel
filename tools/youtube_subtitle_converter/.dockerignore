@@ -1,0 +1,38 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+
+# Gradio cache
+.gradio
+
+# 本機輸出目錄
+output/
+temp/
+
+# 開發工具
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Mac 應用程式（部署時不需要）
+*.app/
+*.command
+
+# 環境設定（使用環境變數）
+.env
+.env.local
+
+# 其他
+*.log
+*.tmp

@@ -48,10 +48,14 @@ LANG_CODE_TO_NAME = {v: k for k, v in SUPPORTED_LANGUAGES.items()}
 
 class Config:
     """應用程式設定"""
-    GEMINI_API_KEY: str = "AIzaSyDbAyO-T-NJdylQR4W8cfwd78QPImNkDJY"
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
-    OUTPUT_DIR: Path = Path("./output")
-    TEMP_DIR: Path = Path("./temp")
+    # API 金鑰可透過環境變數設定
+    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "AIzaSyDbAyO-T-NJdylQR4W8cfwd78QPImNkDJY")
+    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-exp")
+
+    # 雲端環境使用 /tmp，本機使用 ./output
+    IS_CLOUD = os.environ.get("K_SERVICE") is not None  # Cloud Run 設定的環境變數
+    OUTPUT_DIR: Path = Path("/tmp/output") if IS_CLOUD else Path("./output")
+    TEMP_DIR: Path = Path("/tmp/temp") if IS_CLOUD else Path("./temp")
 
     @classmethod
     def set_api_key(cls, api_key: str):
@@ -1037,10 +1041,13 @@ if __name__ == "__main__":
     print("正在啟動網頁介面...")
     print()
 
+    # Cloud Run 使用 PORT 環境變數，本機預設 7860
+    port = int(os.environ.get("PORT", 7860))
+
     app = create_ui()
     app.launch(
         server_name="0.0.0.0",
-        server_port=7860,
-        share=True,
+        server_port=port,
+        share=not Config.IS_CLOUD,  # 雲端環境不需要 share
         inbrowser=False
     )
