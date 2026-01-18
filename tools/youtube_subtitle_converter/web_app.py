@@ -718,6 +718,68 @@ def process_subtitles_only(url: str, source_lang: str, target_langs: list, progr
     except Exception as e:
         return [], f"❌ 錯誤：{str(e)}", f"❌ 錯誤：{str(e)}"
 
+def process_uploaded_audio(audio_file, source_lang: str, target_langs: list, progress=gr.Progress()):
+    """功能5: 上傳音訊檔轉字幕（支援多語言）"""
+    try:
+        if audio_file is None:
+            return [], "請先上傳音訊檔案", "❌ 請先上傳音訊檔案"
+
+        progress(0, desc="開始處理...")
+        Config.ensure_directories()
+
+        source_code = SUPPORTED_LANGUAGES.get(source_lang, "en")
+
+        # 處理多語言選擇
+        if not target_langs:
+            target_langs = ["中文（繁體）"]
+
+        # 取得檔案名稱
+        audio_path = Path(audio_file)
+        title = sanitize_filename(audio_path.stem)
+
+        progress(0.2, desc="AI 語音辨識中（這可能需要幾分鐘）...")
+        srt_content = transcribe_audio_with_gemini(audio_path, source_code)
+
+        # 儲存原始字幕
+        original_srt_path = Config.OUTPUT_DIR / f"{title}_原始_{source_lang}.srt"
+        with open(original_srt_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+
+        # 翻譯成多種語言
+        all_results = []
+        all_results.append(f"📄 **原始字幕 ({source_lang})**\n```\n{srt_content[:2000]}{'...(truncated)' if len(srt_content) > 2000 else ''}\n```\n")
+
+        saved_files = [str(original_srt_path)]
+
+        total_langs = len(target_langs)
+        for i, target_lang in enumerate(target_langs):
+            target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
+
+            progress_val = 0.4 + (0.5 * i / total_langs)
+            progress(progress_val, desc=f"AI 翻譯中（{source_lang} → {target_lang}）... ({i+1}/{total_langs})")
+
+            entries = translate_subtitles(srt_content, source_code, target_code)
+            translated_srt = generate_srt(entries, include_original=False, include_translation=True)
+
+            # 儲存翻譯後的字幕
+            translated_path = Config.OUTPUT_DIR / f"{title}_{target_lang}.srt"
+            with open(translated_path, 'w', encoding='utf-8') as f:
+                f.write(translated_srt)
+            saved_files.append(str(translated_path))
+
+            # 加入結果顯示
+            all_results.append(f"🌐 **{target_lang} 翻譯**\n```\n{translated_srt[:2000]}{'...(truncated)' if len(translated_srt) > 2000 else ''}\n```\n")
+
+        progress(1.0, desc="完成！")
+
+        results_text = "\n---\n".join(all_results)
+        status = f"✅ 完成！已翻譯成 {total_langs} 種語言"
+
+        return saved_files, results_text, status
+
+    except Exception as e:
+        return [], f"❌ 錯誤：{str(e)}", f"❌ 錯誤：{str(e)}"
+
 def save_api_key(api_key: str) -> str:
     """儲存 API 金鑰"""
     if not api_key or len(api_key) < 10:
@@ -826,11 +888,37 @@ def create_ui():
                     outputs=[output4_files, output4_results, output4_status]
                 )
 
+            # 功能5: 上傳音訊轉字幕
+            with gr.Tab("🎤 上傳音訊轉字幕"):
+                gr.Markdown("### 上傳 MP3/音訊檔案，AI 自動辨識並翻譯字幕")
+                audio_input = gr.Audio(label="上傳音訊檔案", type="filepath")
+                with gr.Row():
+                    source_lang5 = gr.Dropdown(choices=lang_choices, value="英文", label="音訊語言", scale=1)
+                    target_langs5 = gr.Dropdown(
+                        choices=lang_choices,
+                        value=["中文（繁體）"],
+                        label="翻譯成（可多選）",
+                        multiselect=True,
+                        scale=2
+                    )
+                btn5 = gr.Button("🚀 開始辨識", variant="primary")
+                output5_status = gr.Textbox(label="狀態", lines=2)
+                gr.Markdown("### 📥 下載字幕檔")
+                output5_files = gr.Files(label="字幕檔案（點擊下載）")
+                gr.Markdown("### 📄 辨識與翻譯結果")
+                output5_results = gr.Markdown(label="結果")
+
+                btn5.click(
+                    process_uploaded_audio,
+                    inputs=[audio_input, source_lang5, target_langs5],
+                    outputs=[output5_files, output5_results, output5_status]
+                )
+
         gr.Markdown(
             """
             ---
             ### 使用說明
-            1. **貼上網址**：將 YouTube 影片網址貼到輸入框
+            1. **貼上網址**：將 YouTube 影片網址貼到輸入框（或上傳音訊檔案）
             2. **選擇語言**：選擇原始語言和要翻譯成的語言
             3. **開始轉換**：點擊按鈕等待處理完成
             4. **下載檔案**：處理完成後點擊下載
