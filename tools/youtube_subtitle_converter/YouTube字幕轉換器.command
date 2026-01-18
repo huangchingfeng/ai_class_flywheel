@@ -6,8 +6,9 @@ echo "🎬 YouTube 字幕轉換器"
 echo "========================================"
 echo ""
 
-# 進入程式目錄
-cd "$(dirname "$0")"
+# 進入程式目錄（使用絕對路徑）
+APP_DIR="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter"
+cd "$APP_DIR"
 
 # 啟動網頁介面
 echo "正在啟動..."
