@@ -647,16 +647,19 @@ def process_to_mp3(url: str, progress=gr.Progress()) -> Tuple[str, str]:
     except Exception as e:
         return None, f"❌ 錯誤：{str(e)}"
 
-def process_subtitles_only(url: str, source_lang: str, target_lang: str, progress=gr.Progress()) -> Tuple[str, str, str, str]:
-    """功能4: 只輸出字幕檔"""
+def process_subtitles_only(url: str, source_lang: str, target_langs: list, progress=gr.Progress()) -> Tuple[str, str, str, str, str]:
+    """功能4: 只輸出字幕檔（支援多語言）"""
     try:
         progress(0, desc="開始處理...")
         Config.ensure_directories()
 
         source_code = SUPPORTED_LANGUAGES.get(source_lang, "en")
-        target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
 
-        progress(0.2, desc="取得影片資訊...")
+        # 處理多語言選擇
+        if not target_langs:
+            target_langs = ["中文（繁體）"]
+
+        progress(0.1, desc="取得影片資訊...")
         info = get_video_info(url)
         title = sanitize_filename(info.get("title", "video"))
 
@@ -668,39 +671,53 @@ def process_subtitles_only(url: str, source_lang: str, target_lang: str, progres
                 srt_content = f.read()
         else:
             # 沒有現有字幕，使用 AI 語音辨識
-            progress(0.3, desc="沒有找到現有字幕，正在下載音訊...")
+            progress(0.25, desc="沒有找到現有字幕，正在下載音訊...")
             audio_path, _ = download_audio(url, Config.TEMP_DIR)
 
-            progress(0.4, desc="AI 語音辨識中（這可能需要幾分鐘）...")
+            progress(0.3, desc="AI 語音辨識中（這可能需要幾分鐘）...")
             srt_content = transcribe_audio_with_gemini(audio_path, source_code)
             detected_lang = source_code
 
-        progress(0.5, desc=f"AI 翻譯中（{source_lang} → {target_lang}）...")
-        entries = translate_subtitles(srt_content, detected_lang, target_code)
+        # 儲存原始字幕
+        original_srt_path = Config.OUTPUT_DIR / f"{title}_原始_{source_lang}.srt"
+        with open(original_srt_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
 
-        progress(0.8, desc="生成字幕檔...")
+        # 翻譯成多種語言
+        all_results = []
+        all_results.append(f"📄 **原始字幕 ({source_lang})**\n```\n{srt_content[:2000]}{'...(truncated)' if len(srt_content) > 2000 else ''}\n```\n")
 
-        # 生成各種版本
-        translated_srt = generate_srt(entries, include_original=False, include_translation=True)
-        original_srt = generate_srt(entries, include_original=True, include_translation=False)
-        bilingual_srt = generate_srt(entries, include_original=True, include_translation=True)
+        saved_files = [str(original_srt_path)]
 
-        translated_path = Config.OUTPUT_DIR / f"{title}_{target_lang}.srt"
-        original_path = Config.OUTPUT_DIR / f"{title}_{source_lang}.srt"
-        bilingual_path = Config.OUTPUT_DIR / f"{title}_雙語.srt"
+        total_langs = len(target_langs)
+        for i, target_lang in enumerate(target_langs):
+            target_code = SUPPORTED_LANGUAGES.get(target_lang, "zh-TW")
 
-        with open(translated_path, 'w', encoding='utf-8') as f:
-            f.write(translated_srt)
-        with open(original_path, 'w', encoding='utf-8') as f:
-            f.write(original_srt)
-        with open(bilingual_path, 'w', encoding='utf-8') as f:
-            f.write(bilingual_srt)
+            progress_val = 0.4 + (0.5 * i / total_langs)
+            progress(progress_val, desc=f"AI 翻譯中（{source_lang} → {target_lang}）... ({i+1}/{total_langs})")
+
+            entries = translate_subtitles(srt_content, detected_lang, target_code)
+            translated_srt = generate_srt(entries, include_original=False, include_translation=True)
+
+            # 儲存翻譯後的字幕
+            translated_path = Config.OUTPUT_DIR / f"{title}_{target_lang}.srt"
+            with open(translated_path, 'w', encoding='utf-8') as f:
+                f.write(translated_srt)
+            saved_files.append(str(translated_path))
+
+            # 加入結果顯示
+            all_results.append(f"🌐 **{target_lang} 翻譯**\n```\n{translated_srt[:2000]}{'...(truncated)' if len(translated_srt) > 2000 else ''}\n```\n")
 
         progress(1.0, desc="完成！")
-        return str(translated_path), str(original_path), str(bilingual_path), f"✅ 完成！字幕檔已儲存到 {Config.OUTPUT_DIR}"
+
+        results_text = "\n---\n".join(all_results)
+        files_text = "\n".join([f"- {f}" for f in saved_files])
+        status = f"✅ 完成！已翻譯成 {total_langs} 種語言\n\n📁 已儲存的檔案：\n{files_text}"
+
+        return results_text, status
 
     except Exception as e:
-        return None, None, None, f"❌ 錯誤：{str(e)}"
+        return f"❌ 錯誤：{str(e)}", f"❌ 錯誤：{str(e)}"
 
 def save_api_key(api_key: str) -> str:
     """儲存 API 金鑰"""
@@ -784,21 +801,29 @@ def create_ui():
 
                 btn3.click(process_to_mp3, inputs=[url3], outputs=[output3_audio, output3_status])
 
-            # 功能4: 只要字幕檔
+            # 功能4: 只要字幕檔（多語言）
             with gr.Tab("📝 只要字幕檔"):
-                gr.Markdown("### 取得 YouTube 影片的字幕檔（不下載影片）")
+                gr.Markdown("### 取得 YouTube 影片的字幕檔（支援多語言翻譯）")
                 url4 = gr.Textbox(label="YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
                 with gr.Row():
                     source_lang4 = gr.Dropdown(choices=lang_choices, value="英文", label="原始字幕語言", scale=1)
-                    target_lang4 = gr.Dropdown(choices=lang_choices, value="中文（繁體）", label="翻譯成", scale=1)
-                btn4 = gr.Button("🚀 開始轉換", variant="primary")
-                with gr.Row():
-                    output4_translated = gr.File(label="翻譯字幕")
-                    output4_original = gr.File(label="原始字幕")
-                    output4_bilingual = gr.File(label="雙語字幕")
-                output4_status = gr.Textbox(label="狀態")
+                    target_langs4 = gr.Dropdown(
+                        choices=lang_choices,
+                        value=["中文（繁體）"],
+                        label="翻譯成（可多選）",
+                        multiselect=True,
+                        scale=2
+                    )
+                btn4 = gr.Button("🚀 開始翻譯", variant="primary")
+                output4_status = gr.Textbox(label="狀態", lines=6)
+                gr.Markdown("### 翻譯結果預覽")
+                output4_results = gr.Markdown(label="翻譯結果")
 
-                btn4.click(process_subtitles_only, inputs=[url4, source_lang4, target_lang4], outputs=[output4_translated, output4_original, output4_bilingual, output4_status])
+                btn4.click(
+                    process_subtitles_only,
+                    inputs=[url4, source_lang4, target_langs4],
+                    outputs=[output4_results, output4_status]
+                )
 
         gr.Markdown(
             """
