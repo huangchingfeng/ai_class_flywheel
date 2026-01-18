@@ -1,34 +1,12 @@
 #!/bin/bash
 # YouTube 字幕轉換器 - Mac App 啟動器
+# 使用 AppleScript 在 Terminal 中執行
 
-# 進入程式目錄
 APP_DIR="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter"
 
-# 檢查目錄是否存在
-if [ ! -d "$APP_DIR" ]; then
-    osascript -e 'display alert "錯誤" message "找不到程式目錄：'$APP_DIR'" as critical'
-    exit 1
-fi
-
-cd "$APP_DIR"
-
-# 關閉舊的服務（如果有的話）
-lsof -ti:7860 | xargs kill -9 2>/dev/null
-
-# 清理快取
-rm -rf __pycache__ .gradio 2>/dev/null
-
-# 顯示啟動通知
-osascript -e 'display notification "正在啟動服務..." with title "YouTube 字幕轉換器"'
-
-# 啟動服務（在背景執行）
-/usr/bin/python3 web_app.py > /tmp/youtube_subtitle_converter.log 2>&1 &
-
-# 等待服務啟動
-sleep 4
-
-# 開啟瀏覽器
-open "http://localhost:7860"
-
-# 顯示完成通知
-osascript -e 'display notification "服務已啟動！" with title "YouTube 字幕轉換器" sound name "Glass"'
+osascript <<EOF
+tell application "Terminal"
+    activate
+    do script "cd '$APP_DIR' && clear && echo '' && echo '  ╔═══════════════════════════════════════════════════════╗' && echo '  ║                                                       ║' && echo '  ║   ▶ YouTube  字幕轉換器                               ║' && echo '  ║                                                       ║' && echo '  ║   AI 智慧翻譯 · 多語言支援 · 一鍵產生字幕             ║' && echo '  ║                                                       ║' && echo '  ╚═══════════════════════════════════════════════════════╝' && echo '' && lsof -ti:7860 | xargs kill -9 2>/dev/null; rm -rf __pycache__ .gradio 2>/dev/null; echo '  🚀 正在啟動服務...' && echo '' && python3 web_app.py & sleep 4 && open 'http://localhost:7860' && echo '' && echo '  ✅ 服務已啟動！' && echo '' && echo '  📍 本機網址: http://localhost:7860' && echo '' && echo '  💡 提示: 按 Ctrl+C 可以關閉服務' && echo '' && wait"
+end tell
+EOF
