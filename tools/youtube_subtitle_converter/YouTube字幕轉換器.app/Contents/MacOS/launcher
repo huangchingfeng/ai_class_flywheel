@@ -1,0 +1,25 @@
+#!/bin/bash
+# YouTube 字幕轉換器 - Mac App 啟動器
+
+# 進入程式目錄
+APP_DIR="$HOME/ai_class_flywheel/tools/youtube_subtitle_converter"
+cd "$APP_DIR"
+
+# 關閉舊的服務（如果有的話）
+lsof -ti:7860 | xargs kill -9 2>/dev/null
+
+# 清理快取
+rm -rf __pycache__ .gradio 2>/dev/null
+
+# 啟動服務
+python3 web_app.py &
+sleep 3
+
+# 開啟瀏覽器
+open "http://localhost:7860"
+
+# 顯示通知
+osascript -e 'display notification "服務已啟動！瀏覽器將自動開啟。" with title "YouTube 字幕轉換器" sound name "Glass"'
+
+# 等待服務結束
+wait
