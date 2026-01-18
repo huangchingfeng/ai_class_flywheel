@@ -1,0 +1,20 @@
+# YouTube Subtitle Converter Dependencies
+
+# YouTube 下載
+yt-dlp>=2024.1.0
+
+# Google Gemini API
+google-generativeai>=0.5.0
+
+# 音訊處理
+pydub>=0.25.1
+
+# 進度顯示
+tqdm>=4.66.0
+
+# 環境變數管理
+python-dotenv>=1.0.0
+
+# CLI 介面
+click>=8.1.0
+rich>=13.0.0
