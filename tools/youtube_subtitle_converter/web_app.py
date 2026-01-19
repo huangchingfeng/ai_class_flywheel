@@ -213,6 +213,24 @@ def download_subtitles_any_language(url: str, output_dir: Path, preferred_lang: 
 
     return None, ""
 
+# ==================== 音訊轉換 ====================
+
+def convert_audio_to_m4a(input_path: Path) -> Path:
+    """將音訊檔案轉換為 M4A 格式（Gemini API 支援較佳）"""
+    output_path = Config.TEMP_DIR / f"{input_path.stem}_converted.m4a"
+
+    cmd = [
+        "ffmpeg", "-i", str(input_path),
+        "-c:a", "aac", "-b:a", "128k",
+        "-y", str(output_path)
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"音訊轉換失敗: {result.stderr}")
+
+    return output_path
+
 # ==================== Gemini API ====================
 
 def upload_file_to_gemini(file_path: Path) -> str:
@@ -288,19 +306,33 @@ def transcribe_audio_with_gemini(audio_path: Path, source_lang: str = "en") -> s
     if not Config.GEMINI_API_KEY:
         raise ValueError("請先設定 Gemini API 金鑰")
 
+    # 如果是 MP3 格式，先轉換成 M4A（Gemini 支援較佳）
+    converted_path = None
+    upload_path = audio_path
+
+    if audio_path.suffix.lower() in ['.mp3', '.wav', '.ogg', '.flac']:
+        print(f"正在轉換音訊格式為 M4A...")
+        try:
+            converted_path = convert_audio_to_m4a(audio_path)
+            upload_path = converted_path
+            print(f"音訊格式轉換完成")
+        except Exception as e:
+            print(f"音訊轉換失敗，使用原始檔案: {e}")
+
     print(f"正在上傳音訊檔案進行語音辨識...")
 
-    # 上傳檔案
-    file_uri = upload_file_to_gemini(audio_path)
+    try:
+        # 上傳檔案
+        file_uri = upload_file_to_gemini(upload_path)
 
-    print(f"檔案已上傳，正在進行語音辨識...")
+        print(f"檔案已上傳，正在進行語音辨識...")
 
-    # 使用 Gemini 進行語音辨識
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent?key={Config.GEMINI_API_KEY}"
+        # 使用 Gemini 進行語音辨識
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{Config.GEMINI_MODEL}:generateContent?key={Config.GEMINI_API_KEY}"
 
-    source_name = get_language_name(source_lang)
+        source_name = get_language_name(source_lang)
 
-    prompt = f"""請聽這段音訊，並將其轉錄成文字。
+        prompt = f"""請聽這段音訊，並將其轉錄成文字。
 
 要求：
 1. 辨識音訊中的{source_name}語音內容
@@ -320,24 +352,28 @@ def transcribe_audio_with_gemini(audio_path: Path, source_lang: str = "en") -> s
 
 請開始轉錄："""
 
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "contents": [{
-            "parts": [
-                {"file_data": {"mime_type": "audio/mpeg", "file_uri": file_uri}},
-                {"text": prompt}
-            ]
-        }],
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 8192
+        headers = {"Content-Type": "application/json"}
+        data = {
+            "contents": [{
+                "parts": [
+                    {"file_data": {"mime_type": "audio/mp4", "file_uri": file_uri}},
+                    {"text": prompt}
+                ]
+            }],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 8192
+            }
         }
-    }
 
-    response = requests.post(url, headers=headers, json=data, timeout=300)
+        response = requests.post(url, headers=headers, json=data, timeout=300)
 
-    if response.status_code != 200:
-        raise RuntimeError(f"語音辨識失敗: {response.text}")
+        if response.status_code != 200:
+            raise RuntimeError(f"語音辨識失敗: {response.text}")
+    finally:
+        # 清理轉換的暫存檔
+        if converted_path and converted_path.exists():
+            converted_path.unlink()
 
     result = response.json()
     srt_content = result["candidates"][0]["content"]["parts"][0]["text"]
