@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 業務飛輪 - 工具中心</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: rgba(255,255,255,0.9);
+            text-align: center;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+        }
+
+        .tools-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .tool-card {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.3s, box-shadow 0.3s;
+            display: block;
+        }
+
+        .tool-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+
+        .tool-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .tool-title {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .tool-desc {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            margin-top: 40px;
+            font-size: 0.9rem;
+        }
+
+        .footer a {
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI 業務飛輪實戰班</h1>
+        <p class="subtitle">合作夥伴專屬工具</p>
+
+        <div class="tools-grid">
+            <a href="partnership-deck.html" class="tool-card">
+                <div class="tool-icon">&#128218;</div>
+                <h2 class="tool-title">合作夥伴簡報</h2>
+                <p class="tool-desc">完整的商業合作模式介紹，包含課程架構、分潤機制、市場機會等 15 頁簡報。支援鍵盤/點擊操作。</p>
+            </a>
+
+            <a href="profit-calculator.html" class="tool-card">
+                <div class="tool-icon">&#128200;</div>
+                <h2 class="tool-title">分潤計算機</h2>
+                <p class="tool-desc">輸入預估報名人數，即時計算雙方的營收與獲利。支援多班次模擬與情境對比。</p>
+            </a>
+        </div>
+
+        <div class="footer">
+            <p>AI 峰哥 x 精實國際 | <a href="https://www.autolab.cloud/ai-super-sales" target="_blank">課程報名頁</a></p>
+        </div>
+    </div>
+</body>
+</html>
